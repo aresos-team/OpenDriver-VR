@@ -53,7 +53,7 @@ Supported / planned tracking inputs:
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/yourname/OpenDriverVR.git
+   git clone https://github.com/rozgaleziacz/OpenDriver-VR.git
    ```
 
 2. Build the driver (Visual Studio recommended)
