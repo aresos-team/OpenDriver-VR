@@ -1,5 +1,7 @@
 # OpenDriverVR
 
+https://img.shields.io/github/stars/rozgaleziacz/OpenDriverVR?style=for-the-badge
+
 OpenDriverVR is an open-source SteamVR driver that emulates a VR headset (HMD) and enables custom tracking solutions such as Kinect, webcam, or other devices.
 
 ## 🚀 Features
