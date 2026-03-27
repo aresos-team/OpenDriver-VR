@@ -1,5 +1,5 @@
 
-<img width="1365" height="1024" alt="banner" src="https://github.com/user-attachments/assets/08c1a681-e9f7-4c4d-b3ac-a551c6f7213d" />
+<img width="1365" height="577" alt="banner (1)" src="https://github.com/user-attachments/assets/25d4af77-fe2a-4527-aa25-d1b7eeeb96cd" />
 
 ![Built with C++](https://img.shields.io/badge/Built%20with-C%2B%2B-blue?style=for-the-badge&logo=c%2B%2B)
 ![SteamVR](https://img.shields.io/badge/SteamVR-compatible-black?style=for-the-badge)
