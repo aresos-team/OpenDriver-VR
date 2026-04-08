@@ -24,6 +24,16 @@ enum class EventType : uint32_t {
     PLUGIN_LOADED = 0x1000,
     PLUGIN_UNLOADED = 0x1001,
     PLUGIN_ERROR = 0x1002,
+    PLUGIN_WARNING = 0x1003,
+    PLUGIN_INFO = 0x1004,
+
+    // Logging & diagnostics
+    LOG_TRACE = 0x1010,
+    LOG_DEBUG = 0x1011,
+    LOG_INFO = 0x1012,
+    LOG_WARN = 0x1013,
+    LOG_ERROR = 0x1014,
+    LOG_CRITICAL = 0x1015,
 
     // Configuration
     CONFIG_CHANGED = 0x2000,
@@ -35,9 +45,55 @@ enum class EventType : uint32_t {
     INPUT_UPDATE = 0x3003,
     HAPTIC_ACTION = 0x3004,
 
+    // Video pipeline
+    VIDEO_FRAME = 0x4000,      // H264 NAL packet from SteamVR compositor
+
     // Generic plugin events (pluginy mogą definiować swoje własne)
     // Plugin może publikować EventType(0x8000 + custom_id)
     USER_DEFINED_BASE = 0x8000,
+};
+
+// ============================================================================
+// LOGGING MESSAGE (używane w LOG_* event types)
+// ============================================================================
+
+enum class LogLevelEnum : int {
+    TRACE = 0,
+    DEBUG = 1,
+    INFO = 2,
+    WARN = 3,
+    ERROR = 4,
+    CRITICAL = 5,
+};
+
+struct LogMessage {
+    LogLevelEnum level;
+    std::string plugin_name;
+    std::string message;
+    uint64_t timestamp;  // ms since epoch
+    
+    LogMessage() : level(LogLevelEnum::INFO), timestamp(0) {}
+    
+    LogMessage(LogLevelEnum lvl, const std::string& plugin, const std::string& msg)
+        : level(lvl), plugin_name(plugin), message(msg),
+          timestamp(std::chrono::system_clock::now().time_since_epoch().count() / 1000000) {}
+};
+
+// ============================================================================
+// PLUGIN ERROR DETAILS
+// ============================================================================
+
+struct PluginErrorData {
+    std::string plugin_name;
+    std::string error_message;
+    std::string error_type;     // "INIT_FAILED", "CRASH", "EXCEPTION", etc.
+    uint64_t timestamp;         // ms since epoch
+    
+    PluginErrorData() : timestamp(0) {}
+    
+    PluginErrorData(const std::string& plugin, const std::string& msg, const std::string& type)
+        : plugin_name(plugin), error_message(msg), error_type(type),
+          timestamp(std::chrono::system_clock::now().time_since_epoch().count() / 1000000) {}
 };
 
 // ============================================================================

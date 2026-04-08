@@ -1,115 +1,137 @@
-# OpenDriver VR Framework 🚀
+# OpenDriver 👓
 
-<img width="1365" height="577" alt="OpenDriver Banner" src="https://github.com/user-attachments/assets/25d4af77-fe2a-4527-aa25-d1b7eeeb96cd" />
-
-![Built with C++](https://img.shields.io/badge/Built%20with-C%2B%2B-blue?style=for-the-badge&logo=c%2B%2B)
-![SteamVR](https://img.shields.io/badge/SteamVR-compatible-black?style=for-the-badge)
-![Tracking](https://img.shields.io/badge/Tracking-6DOF-success?style=for-the-badge)
-![Linux](https://img.shields.io/badge/Linux-Supported-orange?style=for-the-badge)
-![Kinect](https://img.shields.io/badge/Kinect-supported-purple?style=for-the-badge)
-![Webcam](https://img.shields.io/badge/Webcam-supported-informational?style=for-the-badge)
-
-OpenDriver is a modular, open-source SteamVR (OpenVR) driver architecture designed for DIY creators, experimenters, and hardware developers. It provides a robust core to bridge custom tracking solutions (Kinect, phone sensors, webcams) directly into SteamVR via a clean, high-performance plugin API.
-
-## 🧠 Vision & Concept
-OpenDriverVR aims to become a flexible, open platform for experimental VR setups — from cheap DIY builds (using phones as HMDs) to advanced custom tracking research using Kinect or computer vision.
+**OpenDriver** is a modular, high-performance, and cross-platform virtual reality driver wrapper for **SteamVR / OpenVR**. Completely rewritten in modern C++ (from its earlier Rust implementation), it bypasses common SteamVR errors (such as Linux Compositor Error 303 / DRM leasing issues) and serves as a powerful foundation for developers to inject custom trackers, hands, or virtual HMDs into the SteamVR environment using a headless dependency-injected plugin system.
 
 ---
 
-## 🧪 Current Status
-⚠️ **Work in progress**
+## ⚡ Features
 
-- [x] **HMD Driver Core**: Virtual Display support (No DRM lease required).
-- [x] **IPC Bridge**: High-speed Unix Socket communication.
-- [x] **Plugin System**: Dynamic loading & Hot-Reloading.
-- [x] **Input Mapper**: Map arbitrary data to OpenVR inputs.
-- [x] **Tracking Core**: 6DOF support.
-- [ ] **Video Pipeline**: Low-latency video streaming to external HMDs (Planned).
-
----
-
-## 🏗 High-Level Architecture
-1.  **SteamVR Driver (`driver_opendriver.so`)**: A lightweight binary loaded by SteamVR. It acts as an IPC client receiving device data and pose updates.
-2.  **Core Runtime (`opendriver_gui`)**: The central Dashboard handling plugin orchestration and IPC serving.
-3.  **Plugins (`.so`)**: Independent modules implementing hardware-specific logic.
+- **Cross-Platform**: Fully supports both Windows and Linux out of the box.
+- **Advanced Video Pipelines**:
+  - **Windows**: Zero-copy hardware encoding using DirectX 11 / DXGI shared handles coupled with Media Foundation API.
+  - **Linux**: CPU-based highly-optimized `x264` encoding pipeline bypassing standard constraints using low-level `dma-buf` memory mapping. *(Note: HMD emulation is currently disabled on Linux, support may be added in the future!)*
+  - **DRM Bypass (Linux)**: Ships with `opendriver_shim` (`LD_PRELOAD`) to spoof DRM Leasing, forcing SteamVR into working on Linux virtual displays.
+- **Robust IPC & GUI Architecture**: The actual OpenVR `.so`/`.dll` injected into `vrserver` is kept extremely lightweight. The heavy lifting (and the Qt6 debugging interface) operates securely in `opendriver_runner` using Named Pipes / Unix Sockets.
+- **Infinite Modularity**: Instantly add arbitrary hardware (smartphones, custom gloves, OpenCV camera tracking) using isolated `SHARED_LIBRARY` plugins that never compel you to mess with SteamVR API structs.
 
 ---
 
-## 🚀 Key Features
-- **🧠 Custom HMD Emulation**: Fully implements `IVRDisplayComponent` and `IVRVirtualDisplay`.
-- **🎯 6DOF Tracking**: Smooth position and rotation injection for headsets and trackers.
-- **📷 Tracking Agnostic**: Use Kinect, Webcams (AI tracking), or phone IMUs as data sources.
-- **🔌 Developer Friendly**: Hot-reload plugins while SteamVR is running.
-- **🌐 Network Ready**: Easy integration with external Python/OpenCV apps via UDP.
+## 🛠️ Building the Project
 
----
+The CMake build automatically routes the resulting compiled binaries into the `driver/bin/` folder. This means **the repository itself acts as the SteamVR driver folder**! You can register it immediately without copying build files.
 
-## 🛠 Build & Installation
-
-### Prerequisites
-You need a C++17 compiler and the following system packages:
-
-- **CMake** (3.16+)
-- **Qt6 Widgets** development libraries
-- **Git**
-
-#### On Ubuntu / Debian:
-```bash
-sudo apt update
-sudo apt install build-essential cmake qt6-base-dev qt6-declarative-dev libqt6widgets6 git
+### Windows (Native — Recommended)
+Ensure you have **Visual Studio 2022** installed with "Desktop development with C++" and CMake enabled. If you want the GUI dashboard, install Qt6 for MSVC 2019/2022 64-bit.
+```cmd
+cd C:\path\to\opendriver
+cmake -B build -A x64 -DCMAKE_BUILD_TYPE=Release -DQt6_DIR="C:\Qt\6.x\msvc2019_64\lib\cmake\Qt6"
+cmake --build build --config Release --parallel
 ```
+*(For detailed Windows quirks, check out `BUILDING_WINDOWS.md`).*
 
-#### On Arch Linux:
+### Linux 
+To build natively on Linux, ensure you have a standard GCC/Clang toolkit installed.
 ```bash
-sudo pacman -S base-devel cmake qt6-base git
+git clone --recursive <opendriver-url>
+cd opendriver
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel
 ```
-
-### Compilation
-```bash
-git clone https://github.com/rozgaleziacz/OpenDriver-VR.git --recursive
-cd OpenDriver-VR
-mkdir build && cd build
-cmake ..
-make -j$(nproc)
-```
-
-### Driver Installation
-To link the driver to your SteamVR installation:
-```bash
-sudo ./scripts/install_driver.sh
-```
+OpenDriver includes its own static fetch configurations for `FFmpeg` and `x264` under Linux to prevent any dependency hell.
 
 ---
 
-## 🔌 Plugin Development Guide
-Creating a plugin is the easiest way to add your own hardware. Check the [DEVELOPER_GUIDE.md](/docs/DEVELOPER_GUIDE.md) for a deep dive.
+## 📦 Registering with SteamVR
 
-### Minimal `IPlugin` Sample
+Once compiled, simply inform SteamVR where your driver resides.
+
+**Via Command Line (Recommended):**
+```bash
+# Windows
+"C:\Program Files (x86)\Steam\steamapps\common\SteamVR\bin\win64\vrpathreg.exe" adddriver "C:\path\to\opendriver\driver"
+
+# Linux
+~/.local/share/Steam/steamapps/common/SteamVR/bin/linux64/vrpathreg.sh adddriver "/path/to/opendriver/driver"
+```
+Or do it manually through the SteamVR GUI settings (*Settings -> OpenVR -> Manage Add-Ons*).
+
+---
+
+## 🔌 Developing Custom Plugins (API)
+
+Tired of learning the monolithic OpenVR API? OpenDriver provides a vastly simplified dependency-injected `IPluginContext` model. 
+
+### Why Use OpenDriver Plugins?
+1. **No Core Linking Required**: Your plugin is compiled in a **100% standalone** repository. You do not link to the OpenDriver libraries. The context pointer is assigned dynamically at runtime via C-ABI (`dlopen`/`LoadLibrary`).
+2. **Hot-Reloading**: Altered a file and recompiled your `.dll`? OpenDriver runner will snap the new plugin into SteamVR while it's still running, saving variables via `ExportState()`/`ImportState()`.
+3. **Thread Safety**: Dealing with async Bluetooth sockets? Use `m_context->PostToMainThread()` to seamlessly merge it back into the frame-accurate engine loop.
+
+### Quick Start Standalone Plugin
+1. Copy the `include/opendriver/core/` folder from this repo to your standalone plugin project's `include/` folder.
+2. Build a standard shared library exposing `CreatePlugin` and `DestroyPlugin`.
+
+**my_plugin.cpp**
 ```cpp
 #include <opendriver/core/plugin_interface.h>
 
-class MyPlugin : public opendriver::core::IPlugin {
+using namespace opendriver::core;
+
+class MyPlugin : public IPlugin {
+    IPluginContext* m_context = nullptr;
+
 public:
-    const char* GetName() const override { return "my_device"; }
-    
-    bool OnInitialize(opendriver::core::IPluginContext* context) override {
-        opendriver::core::Device d;
-        d.id = "my_id";
-        d.type = opendriver::core::DeviceType::GENERIC_TRACKER;
-        context->RegisterDevice(d);
-        return true;
+    const char* GetName() const override { return "my_cool_tracker"; }
+    const char* GetVersion() const override { return "1.0.0"; }
+    const char* GetDescription() const override { return "Reads IMU data"; }
+    const char* GetAuthor() const override { return "You"; }
+
+    bool OnInitialize(IPluginContext* context) override {
+        m_context = context;
+        
+        // Let's register a floating wand!
+        Device tracker;
+        tracker.id = "my_wand_01";
+        tracker.type = DeviceType::GENERIC_TRACKER;
+        m_context->RegisterDevice(tracker);
+        
+        return true; 
     }
 
-    void OnTick(float dt) override {
-        context->UpdatePose("my_id", x, y, z, qw, qx, qy, qz);
+    void OnTick(float delta_time) override {
+        // Automatically handled ~90 times a second
+        // Set the wand to hover 1.5 meters up!
+        m_context->UpdatePose("my_wand_01", 0.0, 1.5, 0.0, 1.0, 0.0, 0.0, 0.0);
     }
+    
+    void OnShutdown() override {}
+    void OnEvent(const Event& event) override {}
+    bool IsActive() const override { return true; }
 };
+
+// C-API Export
+extern "C" {
+#if defined(_WIN32)
+    __declspec(dllexport) IPlugin* CreatePlugin() { return new MyPlugin(); }
+    __declspec(dllexport) void DestroyPlugin(IPlugin* ptr) { delete ptr; }
+#else
+    __attribute__((visibility("default"))) IPlugin* CreatePlugin() { return new MyPlugin(); }
+    __attribute__((visibility("default"))) void DestroyPlugin(IPlugin* ptr) { delete ptr; }
+#endif
+}
 ```
+
+**CMakeLists.txt**
+```cmake
+cmake_minimum_required(VERSION 3.16)
+project(my_tracking_hardware)
+
+add_library(my_tracker SHARED src/my_plugin.cpp)
+target_include_directories(my_tracker PRIVATE "include/")
+
+# DO NOT LINK ANYTHING! NO target_link_libraries()
+```
+Drop `my_tracker.dll` (or `.so`) into OpenDriver's `plugins/` directory and spin up SteamVR. That's it!
 
 ---
 
-## 📜 License
-This project is licensed under the **MIT License**.
-
-## 🤝 Contributing
-Contributions are welcome! Whether it's adding new tracking sources, improving latency, or porting to other platforms, feel free to open a Pull Request.
+*OpenDriver replaces a previously heavy Rust FFI system with native C++ stability. It heavily leverages `nlohmann::json` and `spdlog` for maximum configuration efficiency and monitoring.*

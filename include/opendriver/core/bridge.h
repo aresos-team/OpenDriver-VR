@@ -9,9 +9,23 @@
 #include <thread>
 #include <atomic>
 #include <cstring>
+#include <chrono>
 
 namespace opendriver::core {
 
+// ============================================================================
+// VIDEO FRAME DATA (payload for VIDEO_FRAME events)
+// ============================================================================
+
+struct VideoFrameData {
+    std::vector<uint8_t> nal_data;  // Raw H264 NAL units
+    uint64_t pts = 0;               // Presentation timestamp
+    uint64_t frame_number = 0;      // Frame counter
+};
+
+// ============================================================================
+// BRIDGE - relay between IPC (SteamVR driver) and EventBus (plugins)
+// ============================================================================
 
 class Bridge : public IEventListener {
 public:
@@ -39,6 +53,9 @@ public:
         ipc_server->Stop();
     }
 
+    // ========================================================================
+    // OnEvent — EventBus → IPC (outbound to SteamVR driver)
+    // ========================================================================
     void OnEvent(const Event& event) override {
         if (!ipc_server->HasClients()) return;
 
@@ -107,9 +124,22 @@ public:
         }
     }
 
+    // ========================================================================
+    // Video stats (for GUI/logging)
+    // ========================================================================
+    uint64_t GetVideoFrameCount() const { return video_frame_count; }
+    uint64_t GetVideoByteCount() const { return video_byte_count; }
+    float GetVideoFPS() const { return video_fps; }
+
 private:
+    // ========================================================================
+    // ReceiveLoop — IPC → EventBus (inbound from SteamVR driver)
+    // ========================================================================
     void ReceiveLoop() {
         bool had_clients = false;
+        auto last_fps_time = std::chrono::steady_clock::now();
+        uint64_t fps_frame_counter = 0;
+
         while (is_running) {
             bool has_clients_now = ipc_server->HasClients();
             
@@ -120,16 +150,50 @@ private:
             had_clients = has_clients_now;
             
             IPCMessage msg;
-            if (ipc_server->Receive(msg, 100)) {
-                if (msg.type == IPCMessageType::HAPTIC_EVENT) {
-                    if (msg.data.size() >= sizeof(IPCHapticEvent)) {
-                        IPCHapticEvent* haptic = (IPCHapticEvent*)msg.data.data();
-                        
-                        Event evt(EventType::HAPTIC_ACTION, "bridge");
-                        evt.data = *haptic; 
-                        event_bus.Publish(evt);
+            if (ipc_server->Receive(msg, 16)) {  // 16ms ≈ ~60Hz poll rate
+                switch (msg.type) {
+                    case IPCMessageType::HAPTIC_EVENT: {
+                        if (msg.data.size() >= sizeof(IPCHapticEvent)) {
+                            IPCHapticEvent* haptic = (IPCHapticEvent*)msg.data.data();
+                            Event evt(EventType::HAPTIC_ACTION, "bridge");
+                            evt.data = *haptic; 
+                            event_bus.Publish(evt);
+                        }
+                        break;
                     }
+
+                    case IPCMessageType::VIDEO_PACKET: {
+                        // ═══════════════════════════════════════════
+                        // H264 relay: Driver → EventBus → Plugins
+                        // ═══════════════════════════════════════════
+                        video_frame_count++;
+                        video_byte_count += msg.data.size();
+                        fps_frame_counter++;
+
+                        VideoFrameData frame;
+                        frame.nal_data = std::move(msg.data);
+                        frame.frame_number = video_frame_count;
+                        frame.pts = std::chrono::steady_clock::now()
+                                        .time_since_epoch().count();
+
+                        Event evt(EventType::VIDEO_FRAME, "bridge");
+                        evt.data = std::move(frame);
+                        event_bus.Publish(evt);
+                        break;
+                    }
+
+                    default:
+                        break;
                 }
+            }
+
+            // FPS calculation (every second)
+            auto now = std::chrono::steady_clock::now();
+            auto elapsed = std::chrono::duration<float>(now - last_fps_time).count();
+            if (elapsed >= 1.0f) {
+                video_fps = fps_frame_counter / elapsed;
+                fps_frame_counter = 0;
+                last_fps_time = now;
             }
         }
     }
@@ -177,6 +241,11 @@ private:
     std::unique_ptr<IIPCServer> ipc_server;
     std::thread receive_thread;
     std::atomic<bool> is_running{false};
+
+    // Video stats
+    std::atomic<uint64_t> video_frame_count{0};
+    std::atomic<uint64_t> video_byte_count{0};
+    std::atomic<float> video_fps{0.0f};
 };
 
 } // namespace opendriver::core

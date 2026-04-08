@@ -1,6 +1,7 @@
 #pragma once
 
 #include <opendriver/core/plugin_interface.h>
+#include <opendriver/core/dynlib.h>
 #include <string>
 #include <map>
 #include <memory>
@@ -113,11 +114,11 @@ public:
 
 private:
     struct LoadedPlugin {
-        IPlugin* instance;
-        void* library_handle;
+        IPlugin*       instance;
+        LibHandle      library_handle;
         DestroyPluginFn destroy_fn;
-        std::string file_path;
-        std::string name;
+        std::string    file_path;
+        std::string    name;
         std::filesystem::file_time_type last_write_time;
     };
 
@@ -128,9 +129,9 @@ private:
     mutable std::mutex mutex;
     float hot_reload_timer = 0.0f;
 
-    void* OpenLibrary(const std::string& path);
-    void CloseLibrary(void* handle);
-    void* GetSymbol(void* handle, const std::string& name);
+    LibHandle OpenLibrary(const std::string& path);
+    void      CloseLibrary(LibHandle handle);
+    void*     GetSymbol(LibHandle handle, const std::string& name);
 };
 
 } // namespace opendriver::core

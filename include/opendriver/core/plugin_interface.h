@@ -138,10 +138,21 @@ public:
     // LOGGING (pisanie do centralized log'u)
     // ────────────────────────────────────────────────────────────────────
 
-    /// Zalogowanie wiadomości
+    /// Zalogowanie wiadomości na określonym level
     /// Automatycznie dodaje timestamp i plugin name
     /// Output: "[2024-01-15 14:23:45.123] [INFO] [leap_motion] Hand detected"
+    /// 
+    /// @param level: log level (0=TRACE, 1=DEBUG, 2=INFO, 3=WARN, 4=ERROR, 5=CRITICAL)
+    /// @param message: treść wiadomości
     virtual void Log(int level, const char* message) = 0;
+    
+    /// Wygoda metody
+    virtual void LogTrace(const char* msg) { Log(0, msg); }
+    virtual void LogDebug(const char* msg) { Log(1, msg); }
+    virtual void LogInfo(const char* msg) { Log(2, msg); }
+    virtual void LogWarn(const char* msg) { Log(3, msg); }
+    virtual void LogError(const char* msg) { Log(4, msg); }
+    virtual void LogCritical(const char* msg) { Log(5, msg); }
 
     // ────────────────────────────────────────────────────────────────────
     // DEVICE REGISTRY (rejestracja virtual devices)

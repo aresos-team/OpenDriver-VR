@@ -15,6 +15,7 @@ enum class IPCMessageType : uint32_t {
     PROPERTY_UPDATE = 0x04,
     INPUT_UPDATE = 0x05,
     HAPTIC_EVENT = 0x06,
+    VIDEO_PACKET = 0x07,
     HEARTBEAT = 0xFF
 };
 

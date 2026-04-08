@@ -12,6 +12,10 @@ class QLineEdit;
 class QTextEdit;
 class QLabel;
 class QItemSelection;
+class QSpinBox;
+class QComboBox;
+class QSlider;
+class QCheckBox;
 
 namespace opendriver::ui {
 
@@ -29,6 +33,13 @@ private slots:
     void onPluginSelected(const QItemSelection& selected, const QItemSelection& deselected);
     void onLogReceived(const opendriver::core::LogEntry& entry);
     void onPluginTableClicked(const QModelIndex& index);
+    
+    // Video encoding settings
+    void onBitrateChanged(int value);
+    void onEncoderTypeChanged(int index);
+    void onQualityPresetChanged(int index);
+    void onApplyVideoSettings();
+    void onLoadVideoSettings();
 
 private:
     opendriver::core::Runtime* m_runtime;
@@ -46,6 +57,13 @@ private:
     QLineEdit* m_searchEdit;
     
     std::string m_selectedPlugin;
+    
+    // Video encoding UI
+    QSpinBox* m_bitrateSpinBox;
+    QComboBox* m_encoderTypeCombo;
+    QComboBox* m_qualityPresetCombo;
+    QLabel* m_bitrateValueLabel;
+    QLabel* m_encodingStatsLabel;
     
     void setupUI();
 };
