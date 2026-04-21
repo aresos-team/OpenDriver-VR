@@ -142,7 +142,7 @@ private:
                 PIPE_ACCESS_DUPLEX,
                 PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
                 PIPE_UNLIMITED_INSTANCES,
-                65536, 65536, 0, nullptr
+                4 * 1024 * 1024, 4 * 1024 * 1024, 0, nullptr
             );
             if (pipe == INVALID_HANDLE_VALUE) { ::Sleep(50); continue; }
             BOOL ok = ::ConnectNamedPipe(pipe, nullptr)

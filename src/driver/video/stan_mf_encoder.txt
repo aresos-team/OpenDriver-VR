@@ -1,0 +1,89 @@
+✅ CO JEST TERAZ DOBRZE
+
+✔ ZERO CPU conversion
+✔ ZERO Map/Unmap
+✔ ZERO staging textures
+✔ Używasz MFCreateDXGISurfaceBuffer ✔
+✔ Pipeline GPU → encoder ✔
+
+👉 to już eliminuje największy bottleneck
+
+⚠️ PROBLEM #1 — format tekstury (BARDZO WAŻNE)
+
+Masz:
+
+desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+
+Ale encoder często oczekuje:
+
+👉 DXGI_FORMAT_B8G8R8A8_UNORM
+
+💥 Efekt:
+driver robi ukrytą konwersję
+albo encoder działa wolniej
+albo fallback na software
+✅ FIX:
+
+Zmień na:
+
+desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+⚠️ PROBLEM #2 — Keyed Mutex (może blokować VR)
+
+Masz:
+
+keyed_mutex->AcquireSync(0, 10);
+💥 Problem:
+10 ms timeout = cały frame VR
+jeśli SteamVR się spóźni → czekasz → drop FPS
+✅ FIX (bezpieczniejszy):
+if (FAILED(keyed_mutex->AcquireSync(0, 0))) {
+    return false; // skip frame zamiast blokować
+}
+
+👉 VR preferuje drop frame niż stall
+
+⚠️ PROBLEM #3 — SetCurrentLength(1) (subtelne)
+
+Masz:
+
+buffer->SetCurrentLength(1);
+💥 To jest hack
+
+Niektóre encodery:
+
+mogą się dławić
+mogą robić kopię
+✅ LEPSZE:
+buffer->SetCurrentLength(desc.Width * desc.Height * 4);
+
+(albo zostaw 1 jeśli działa stabilnie — ale to nie jest clean)
+
+⚠️ PROBLEM #4 — brak explicit input format check
+
+Nie widzę czy sprawdzasz czy encoder zaakceptował RGB.
+
+👉 jeśli NIE:
+
+może robić fallback (slow path)
+🔥 NAJWAŻNIEJSZY TEST
+
+Zrób to:
+
+🧪 włącz profiler (PIX / GPUView / Afterburner)
+
+Sprawdź:
+
+CPU usage ↓ ?
+GPU usage ↑ ?
+brak stalls?
+📊 REALNY EXPECTATION
+Stan	FPS
+przed	~10
+teraz	40–90
+po fixach	90+ stabilne
+🧠 TL;DR
+
+✔ jesteś już na dobrej drodze
+❗ ale:
+
+format + mutex = hidden FPS killers

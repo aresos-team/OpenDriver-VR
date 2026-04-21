@@ -14,6 +14,9 @@
         #define NOMINMAX
     #endif
     #include <windows.h>
+    #ifdef ERROR
+        #undef ERROR
+    #endif
     // Shared library suffix
     #define OD_LIB_SUFFIX ".dll"
     #define OD_LIB_PREFIX ""

@@ -58,12 +58,12 @@ enum class EventType : uint32_t {
 // ============================================================================
 
 enum class LogLevelEnum : int {
-    TRACE = 0,
-    DEBUG = 1,
-    INFO = 2,
-    WARN = 3,
-    ERROR = 4,
-    CRITICAL = 5,
+    Trace = 0,
+    Debug = 1,
+    Info = 2,
+    Warn = 3,
+    Error = 4,
+    Critical = 5,
 };
 
 struct LogMessage {
@@ -72,7 +72,7 @@ struct LogMessage {
     std::string message;
     uint64_t timestamp;  // ms since epoch
     
-    LogMessage() : level(LogLevelEnum::INFO), timestamp(0) {}
+    LogMessage() : level(LogLevelEnum::Info), timestamp(0) {}
     
     LogMessage(LogLevelEnum lvl, const std::string& plugin, const std::string& msg)
         : level(lvl), plugin_name(plugin), message(msg),

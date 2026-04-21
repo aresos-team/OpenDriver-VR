@@ -1,0 +1,12 @@
+{
+  "bindings": {
+    "/actions/legacy": {
+      "haptics": [],
+      "poses": [],
+      "sources": []
+    }
+  },
+  "controller_type": "opendriver_hmd",
+  "description": "Legacy bindings for the OpenDriver phone HMD.",
+  "name": "OpenDriver Phone HMD Legacy Bindings"
+}

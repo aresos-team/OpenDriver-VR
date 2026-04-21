@@ -5,11 +5,13 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <map>
 #include <memory>
+#include <unordered_map>
 #include <nlohmann/json.hpp>
 #include <opendriver/core/ipc.h>
 #include <opendriver/core/mapper.h>
@@ -47,6 +49,9 @@ namespace fs = std::filesystem;
 
 using namespace vr;
 using namespace opendriver::core;
+#if defined(OD_PLATFORM_WINDOWS)
+namespace video = opendriver::driver::video;
+#endif
 
 #if defined(_WIN32)
 #define HMD_DLL_EXPORT __declspec(dllexport)
@@ -92,9 +97,10 @@ public:
   }
   void DebugRequest(const char *pchRequest, char *pchResponseBuffer,
                     uint32_t unResponseBufferSize) override {}
-  DriverPose_t GetPose() override { return Mapper::CreateDefaultPose(); }
+  DriverPose_t GetPose() override { return cached_pose; }
 
   void UpdatePose(const DriverPose_t &new_pose) {
+    cached_pose = new_pose;
     if (object_id != k_unTrackedDeviceIndexInvalid) {
       VRServerDriverHost()->TrackedDevicePoseUpdated(object_id, new_pose,
                                                      sizeof(DriverPose_t));
@@ -132,12 +138,16 @@ public:
   }
   const std::string &GetSerial() const { return serial_number; }
 
+protected:
+  void SetCachedPose(const DriverPose_t &pose) { cached_pose = pose; }
+
 private:
   std::string serial_number;
   uint32_t object_id = k_unTrackedDeviceIndexInvalid;
   PropertyContainerHandle_t property_container = k_ulInvalidPropertyContainer;
   VRInputComponentHandle_t haptic_handle = k_ulInvalidInputComponentHandle;
   std::map<std::string, VRInputComponentHandle_t> input_handles;
+  DriverPose_t cached_pose = Mapper::CreateDefaultPose();
 };
 
 // ============================================================================
@@ -148,12 +158,27 @@ class COpenDriverHMD : public COpenDriverDevice,
                        public IVRDisplayComponent,
                        public IVRVirtualDisplay {
 public:
+  static constexpr const char *kControllerType = "opendriver_hmd";
+  static constexpr const char *kRegisteredDeviceType =
+      "opendriver/opendriver_hmd";
+  static constexpr const char *kInputProfilePath =
+      "{opendriver}/input/opendriver_hmd_profile.json";
+  static constexpr const char *kRenderModelFallback = "generic_hmd";
+  static constexpr uint64_t kUniverseId = 12160001ULL;
+  static constexpr float kPlayAreaSizeMeters = 1.0f;
+  static constexpr float kStandingHeightMeters = 1.6f;
+
   COpenDriverHMD(const std::string &serial, IIPCClient *ipc)
       : COpenDriverDevice(serial), m_ipc(ipc) {
+    SetCachedPose(CreateRotationOnlyPose());
     LoadVideoConfig();
+    StartVideoThread();
   }
 
-  ~COpenDriverHMD() { CleanupEncoder(); }
+  ~COpenDriverHMD() { 
+    StopVideoThread();
+    CleanupEncoder(); 
+  }
 
   // Wczytaj ustawienia video z config.json
   void LoadVideoConfig() {
@@ -223,11 +248,14 @@ public:
     cfg.preset = m_quality_preset;
 
     m_winEncoder = video::CreateMediaFoundationEncoder();
+    m_winEncoder->SetLogger([](const char* msg) {
+      if (VRDriverLog()) VRDriverLog()->Log(msg);
+    });
     m_is_encoder_ready = m_winEncoder->Initialize(cfg);
 
     if (m_is_encoder_ready && VRDriverLog()) {
-      VRDriverLog()->Log("OpenDriver: Native Windows HW Encoder initialized "
-                         "via Media Foundation (DXGI)");
+      VRDriverLog()->Log("OpenDriver: Windows Media Foundation encoder staged "
+                         "(MFT activation deferred until first frame)");
     }
     return;
 #endif
@@ -321,6 +349,57 @@ public:
     }
   }
 
+  void StartVideoThread() {
+    if (m_video_thread_running) return;
+    m_video_thread_running = true;
+    m_video_encoder_thread = std::thread(&COpenDriverHMD::VideoEncoderLoop, this);
+  }
+
+  void StopVideoThread() {
+    m_video_thread_running = false;
+    m_video_cv.notify_all();
+    if (m_video_encoder_thread.joinable()) {
+      m_video_encoder_thread.join();
+    }
+  }
+
+  void VideoEncoderLoop() {
+    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
+    while (m_video_thread_running) {
+      void* texture_handle = nullptr;
+      {
+        std::unique_lock<std::mutex> lock(m_video_mutex);
+        m_video_cv.wait(lock, [this] { return !m_video_thread_running || m_last_texture_handle != nullptr; });
+        if (!m_video_thread_running) break;
+        texture_handle = m_last_texture_handle;
+        m_last_texture_handle = nullptr;
+      }
+
+      if (!texture_handle) continue;
+
+      std::vector<uint8_t> out_packet;
+      auto frame_start = std::chrono::steady_clock::now();
+
+      if (m_winEncoder->EncodeFrame(texture_handle, out_packet)) {
+        if (!out_packet.empty() && m_ipc) {
+          IPCMessage video_msg;
+          video_msg.type = IPCMessageType::VIDEO_PACKET;
+          video_msg.data = std::move(out_packet);
+          m_ipc->Send(video_msg);
+        }
+      } else {
+        m_mmap_failures++;
+      }
+
+      m_frame_count++;
+      m_encoding_in_progress = false;
+
+      auto now = std::chrono::steady_clock::now();
+      m_total_encode_ms += std::chrono::duration<float, std::milli>(now - frame_start).count();
+    }
+  }
+
+
   EVRInitError Activate(uint32_t unObjectId) override {
     EVRInitError err = COpenDriverDevice::Activate(unObjectId);
     if (err != VRInitError_None)
@@ -331,11 +410,24 @@ public:
                                       manufacturer.c_str());
     VRProperties()->SetStringProperty(container, Prop_ModelNumber_String,
                                       model.c_str());
+    VRProperties()->SetStringProperty(container,
+                                      Prop_RegisteredDeviceType_String,
+                                      kRegisteredDeviceType);
+    VRProperties()->SetStringProperty(container, Prop_ControllerType_String,
+                                      kControllerType);
+    VRProperties()->SetStringProperty(container, Prop_InputProfilePath_String,
+                                      kInputProfilePath);
+    // Keep SteamVR's stock HMD render model until we ship a dedicated one.
     VRProperties()->SetStringProperty(container, Prop_RenderModelName_String,
-                                      model.c_str());
+                                      kRenderModelFallback);
 
     VRProperties()->SetFloatProperty(container, Prop_DisplayFrequency_Float,
                                      refresh_rate);
+    VRProperties()->SetFloatProperty(container, Prop_UserIpdMeters_Float,
+                                     0.063f);
+    VRProperties()->SetFloatProperty(container,
+                                     Prop_SecondsFromVsyncToPhotons_Float,
+                                     0.011f);
     VRProperties()->SetBoolProperty(container, Prop_DisplayDebugMode_Bool,
                                     false);
 
@@ -356,18 +448,76 @@ public:
     VRProperties()->SetBoolProperty(container, Prop_ReportsTimeSinceVSync_Bool,
                                     true);
 
-    // Universe ID 31 is often used by virtual drivers (like ALVR)
+    const std::string driver_chaperone_json = BuildDriverChaperoneJson();
+
     VRProperties()->SetUint64Property(container, Prop_CurrentUniverseId_Uint64,
-                                      31);
+                                      1);
+    VRProperties()->SetUint64Property(container, Prop_PreviousUniverseId_Uint64,
+                                      1);
+    VRProperties()->SetStringProperty(container,
+                                      Prop_DriverProvidedChaperoneJson_String,
+                                      driver_chaperone_json.c_str());
+    // NOTE: Prop_InterpretedAsOculus_Bool is not defined in the current OpenVR SDK.
+    // VRProperties()->SetBoolProperty(container, Prop_InterpretedAsOculus_Bool,
+    //                                 true);
+    VRProperties()->SetInt32Property(container, Prop_HmdTrackingStyle_Int32,
+                                     2); // Outside-in
+    VRProperties()->SetBoolProperty(container, Prop_DeviceIsCharging_Bool,
+                                    true);
+    VRProperties()->SetBoolProperty(container,
+                                    Prop_DeviceProvidesBatteryStatus_Bool,
+                                    true);
+    VRProperties()->SetFloatProperty(container,
+                                     Prop_DeviceBatteryPercentage_Float, 1.0f);
+    VRProperties()->SetBoolProperty(container,
+                                    Prop_DriverProvidedChaperoneVisibility_Bool,
+                                    false);
     VRProperties()->SetStringProperty(container, Prop_TrackingSystemName_String,
                                       "opendriver");
-    VRProperties()->SetStringProperty(container, Prop_RenderModelName_String,
-                                      "generic_hmd");
+    VRProperties()->SetStringProperty(container,
+                                      Prop_ActualTrackingSystemName_String,
+                                      "opendriver");
+    VRProperties()->SetInt32Property(container,
+                                     Prop_HmdTrackingStyle_Int32,
+                                     HmdTrackingStyle_Unknown);
+    VRProperties()->SetInt32Property(container,
+                                     Prop_ExpectedTrackingReferenceCount_Int32,
+                                     0);
+    VRProperties()->SetInt32Property(container,
+                                     Prop_ExpectedControllerCount_Int32, 0);
+    VRProperties()->SetBoolProperty(container, Prop_HasCamera_Bool, false);
+    VRProperties()->SetInt32Property(container, Prop_NumCameras_Int32, 0);
+    VRProperties()->SetBoolProperty(container, Prop_NeverTracked_Bool, false);
 
-    // Additional flags to make SteamVR happy
-    VRProperties()->SetBoolProperty(container, Prop_WillDriftInYaw_Bool, false);
+    // This HMD is currently 3DoF, so tell SteamVR not to expect full
+    // positional inside-out tracking.
+    VRProperties()->SetBoolProperty(container, Prop_WillDriftInYaw_Bool, true);
     VRProperties()->SetBoolProperty(
         container, Prop_DeviceProvidesBatteryStatus_Bool, true);
+    VRProperties()->SetFloatProperty(container, Prop_DeviceBatteryPercentage_Float, 1.0f);
+    VRProperties()->SetBoolProperty(container, Prop_DeviceIsCharging_Bool, true);
+    VRProperties()->SetBoolProperty(container, Prop_DeviceIsWireless_Bool,
+                                    true);
+    VRProperties()->SetBoolProperty(container, Prop_DeviceCanPowerOff_Bool,
+                                    false);
+    VRProperties()->SetBoolProperty(container, Prop_HasCamera_Bool, false);
+    VRProperties()->SetBoolProperty(container,
+                                    Prop_CanUnifyCoordinateSystemWithHmd_Bool,
+                                    false);
+
+    // Register proximity sensor to prevent standby
+    RegisterInput("/proximity", opendriver::core::InputType::BOOLEAN);
+
+    if (VRDriverLog()) {
+      char buf[192];
+      snprintf(buf, sizeof(buf),
+               "OpenDriver: Published driver chaperone for universe %llu "
+               "(play area %.1fm x %.1fm, standing height %.2fm)",
+               static_cast<unsigned long long>(kUniverseId),
+               kPlayAreaSizeMeters, kPlayAreaSizeMeters,
+               kStandingHeightMeters);
+      VRDriverLog()->Log(buf);
+    }
 
     return VRInitError_None;
   }
@@ -450,43 +600,36 @@ public:
   void Present(const PresentInfo_t *pPresentInfo,
                uint32_t unPresentInfoSize) override {
 #if defined(OD_PLATFORM_WINDOWS)
-    if (!m_is_encoder_ready || !m_winEncoder || !pPresentInfo)
+    // Persistently keep headset active by updating proximity
+    UpdateInput("/proximity", 1.0f);
+
+    if (!m_is_encoder_ready || !m_winEncoder || !pPresentInfo ||
+        unPresentInfoSize < sizeof(PresentInfo_t) ||
+        pPresentInfo->backbufferTextureHandle ==
+            INVALID_SHARED_TEXTURE_HANDLE)
       return;
+
     if (m_encoding_in_progress.exchange(true)) {
       m_frames_dropped++;
       return;
     }
 
-    std::vector<uint8_t> out_packet;
-    auto frame_start = std::chrono::steady_clock::now();
-
-    if (m_winEncoder->EncodeFrame((void *)pPresentInfo->backbufferTextureHandle,
-                                  out_packet)) {
-      if (!out_packet.empty() && m_ipc) {
-        IPCMessage video_msg;
-        video_msg.type = IPCMessageType::VIDEO_PACKET;
-        video_msg.data = std::move(out_packet);
-        m_ipc->Send(video_msg);
-      }
-    } else {
-      m_mmap_failures++;
+    {
+      std::lock_guard<std::mutex> lock(m_video_mutex);
+      m_last_texture_handle = reinterpret_cast<void *>(
+          static_cast<uintptr_t>(pPresentInfo->backbufferTextureHandle));
     }
+    m_video_cv.notify_one();
 
-    m_frame_count++;
-    m_encoding_in_progress = false;
-
-    // Stats
-    auto now = std::chrono::steady_clock::now();
-    m_total_encode_ms +=
-        std::chrono::duration<float, std::milli>(now - frame_start).count();
-
-    if (m_frame_count % ((int)refresh_rate * 5) == 0 && VRDriverLog()) {
+    if (m_frame_count % ((int)refresh_rate * 5) == 0 && VRDriverLog() && m_frame_count > 0) {
       float avg_ms = m_total_encode_ms / m_frame_count;
       char buf[256];
       snprintf(buf, sizeof(buf),
-               "OpenDriver [DX11]: H264 stats — frame #%lu, avg encode %.1fms, "
-               "dropped %lu, fails %lu",
-               m_frame_count, avg_ms, m_frames_dropped, m_mmap_failures);
+               "OpenDriver [DX11]: H264 stats — frame #%llu, avg encode %.1fms, "
+               "dropped %llu, fails %llu",
+               static_cast<unsigned long long>(m_frame_count), avg_ms,
+               static_cast<unsigned long long>(m_frames_dropped),
+               static_cast<unsigned long long>(m_mmap_failures));
       VRDriverLog()->Log(buf);
       m_total_encode_ms = 0;
     }
@@ -582,6 +725,89 @@ public:
 #endif
 
 private:
+  static std::string FormatChaperoneTimestampUtc() {
+    std::time_t now = std::time(nullptr);
+    std::tm utc_tm = {};
+#if defined(_WIN32)
+    gmtime_s(&utc_tm, &now);
+#else
+    gmtime_r(&now, &utc_tm);
+#endif
+
+    char buffer[32];
+    if (std::strftime(buffer, sizeof(buffer), "%Y-%m-%dT%H:%M:%SZ",
+                      &utc_tm) == 0) {
+      return "1970-01-01T00:00:00Z";
+    }
+    return buffer;
+  }
+
+  static nlohmann::json MakePoint(float x, float y, float z) {
+    return nlohmann::json::array({x, y, z});
+  }
+
+  static std::string BuildDriverChaperoneJson() {
+    constexpr float half_extent = kPlayAreaSizeMeters * 0.5f;
+    constexpr float wall_height = 2.0f;
+
+    nlohmann::json collision_bounds = nlohmann::json::array(
+        {nlohmann::json::array({MakePoint(-half_extent, 0.0f, -half_extent),
+                                MakePoint(-half_extent, wall_height,
+                                          -half_extent),
+                                MakePoint(-half_extent, wall_height,
+                                          half_extent),
+                                MakePoint(-half_extent, 0.0f, half_extent)}),
+         nlohmann::json::array({MakePoint(-half_extent, 0.0f, half_extent),
+                                MakePoint(-half_extent, wall_height,
+                                          half_extent),
+                                MakePoint(half_extent, wall_height,
+                                          half_extent),
+                                MakePoint(half_extent, 0.0f, half_extent)}),
+         nlohmann::json::array({MakePoint(half_extent, 0.0f, half_extent),
+                                MakePoint(half_extent, wall_height,
+                                          half_extent),
+                                MakePoint(half_extent, wall_height,
+                                          -half_extent),
+                                MakePoint(half_extent, 0.0f, -half_extent)}),
+         nlohmann::json::array({MakePoint(half_extent, 0.0f, -half_extent),
+                                MakePoint(half_extent, wall_height,
+                                          -half_extent),
+                                MakePoint(-half_extent, wall_height,
+                                          -half_extent),
+                                MakePoint(-half_extent, 0.0f,
+                                          -half_extent)})});
+
+    nlohmann::json universe;
+    universe["collision_bounds"] = std::move(collision_bounds);
+    universe["play_area"] =
+        nlohmann::json::array({kPlayAreaSizeMeters, kPlayAreaSizeMeters});
+    universe["standing"] = {{"translation",
+                              nlohmann::json::array(
+                                  {0.0f, kStandingHeightMeters, 0.0f})},
+                             {"yaw", 0.0f}};
+    universe["seated"] = {{"translation",
+                            nlohmann::json::array({0.0f, 0.0f, 0.0f})},
+                           {"yaw", 0.0f}};
+    universe["time"] = FormatChaperoneTimestampUtc();
+    universe["universeID"] = kUniverseId;
+
+    nlohmann::json chaperone;
+    chaperone["jsonid"] = "chaperone_info";
+    chaperone["version"] = 5;
+    chaperone["universes"] = nlohmann::json::array({std::move(universe)});
+    return chaperone.dump();
+  }
+
+  static DriverPose_t CreateRotationOnlyPose() {
+    DriverPose_t pose = Mapper::CreateDefaultPose();
+    pose.result = TrackingResult_Running_OK;
+    pose.poseIsValid = true;
+    pose.willDriftInYaw = true;
+    pose.shouldApplyHeadModel = true;
+    pose.deviceIsConnected = true;
+    return pose;
+  }
+
   IIPCClient *m_ipc = nullptr;
 #if HAVE_X264
   x264_t *m_encoder = nullptr;
@@ -606,6 +832,13 @@ private:
   uint64_t m_mmap_failures = 0;
   uint64_t m_zero_size_frames = 0;
   float m_total_encode_ms = 0.0f;
+
+  // Background encoding
+  std::thread m_video_encoder_thread;
+  std::condition_variable m_video_cv;
+  std::mutex m_video_mutex;
+  void* m_last_texture_handle = nullptr;
+  std::atomic<bool> m_video_thread_running{false};
 };
 
 // ============================================================================
@@ -662,6 +895,7 @@ public:
       delete dev;
     }
     devices.clear();
+    device_aliases.clear();
     m_hmd = nullptr;
   }
 
@@ -722,13 +956,12 @@ private:
           VRDriverLog()->Log("OpenDriver: IPC reconnected!");
       }
 
-      // ---- Receive messages -------------------------------------------------
       IPCMessage msg;
-      if (ipc_client->Receive(msg, 100)) {
+      while (is_running && ipc_client->Receive(msg, 0)) {
         HandleMessage(msg);
       }
 
-      // ---- Periodic heartbeat -----------------------------------------------
+      // ---- Periodic heartbeat & Keep-alive ---------------------------------
       auto now = std::chrono::steady_clock::now();
       auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
                          now - last_heartbeat)
@@ -737,6 +970,12 @@ private:
         IPCMessage hb;
         hb.type = IPCMessageType::HEARTBEAT;
         ipc_client->Send(hb);
+
+        // Keep SteamVR awake by refreshing proximity for HMD
+        if (m_hmd) {
+           m_hmd->UpdateInput("/proximity", 1.0f);
+        }
+
         last_heartbeat = now;
       }
     }
@@ -749,6 +988,7 @@ private:
           std::string json_str(msg.data.begin(), msg.data.end());
           auto data = nlohmann::json::parse(json_str);
           std::string serial = data["serial_number"];
+          std::string device_id = data.value("id", serial);
 
           if (devices.find(serial) == devices.end()) {
             COpenDriverDevice *device = nullptr;
@@ -795,6 +1035,8 @@ private:
             }
 
             devices[serial] = device;
+            device_aliases[serial] = serial;
+            device_aliases[device_id] = serial;
             VRServerDriverHost()->TrackedDeviceAdded(serial.c_str(),
                                                      device_class, device);
 
@@ -844,7 +1086,13 @@ private:
         if (msg.data.size() >= sizeof(IPCPoseData)) {
           try {
             IPCPoseData *pose_data = (IPCPoseData *)msg.data.data();
-            auto it = devices.find(pose_data->device_id);
+            std::string lookup_key = pose_data->device_id;
+            auto alias_it = device_aliases.find(lookup_key);
+            if (alias_it != device_aliases.end()) {
+              lookup_key = alias_it->second;
+            }
+
+            auto it = devices.find(lookup_key);
             if (it != devices.end()) {
               vr::DriverPose_t vpose = Mapper::CreateDefaultPose();
 
@@ -865,6 +1113,29 @@ private:
               vpose.vecAngularVelocity[1] = pose_data->angVelY;
               vpose.vecAngularVelocity[2] = pose_data->angVelZ;
 
+              if (it->second == m_hmd) {
+                vpose.result = TrackingResult_Running_OK;
+                vpose.poseIsValid = true;
+                vpose.willDriftInYaw = true;
+                vpose.shouldApplyHeadModel = true;
+                vpose.deviceIsConnected = true;
+                ++m_hmdPoseUpdateCount;
+                if (VRDriverLog() &&
+                    (m_hmdPoseUpdateCount == 1 ||
+                     (m_hmdPoseUpdateCount % 300) == 0)) {
+                  char buf[512];
+                  snprintf(buf, sizeof(buf),
+                           "OpenDriver: Applied HMD pose update #%llu via key "
+                           "'%s' -> '%s' pos=[%.3f %.3f %.3f] rot=[%.4f %.4f %.4f %.4f]",
+                           static_cast<unsigned long long>(m_hmdPoseUpdateCount),
+                           pose_data->device_id, lookup_key.c_str(),
+                           pose_data->posX, pose_data->posY, pose_data->posZ,
+                           pose_data->rotW, pose_data->rotX, pose_data->rotY,
+                           pose_data->rotZ);
+                  VRDriverLog()->Log(buf);
+                }
+              }
+
               it->second->UpdatePose(vpose);
             }
           } catch (const std::exception &e) {
@@ -880,7 +1151,13 @@ private:
         if (msg.data.size() >= sizeof(IPCInputUpdate)) {
           try {
             IPCInputUpdate *update = (IPCInputUpdate *)msg.data.data();
-            auto it = devices.find(update->device_id);
+            std::string lookup_key = update->device_id;
+            auto alias_it = device_aliases.find(lookup_key);
+            if (alias_it != device_aliases.end()) {
+              lookup_key = alias_it->second;
+            }
+
+            auto it = devices.find(lookup_key);
             if (it != devices.end()) {
               it->second->UpdateInput(update->component_name, update->value);
             }
@@ -982,8 +1259,9 @@ private:
   std::unique_ptr<IIPCClient> ipc_client;
   std::thread ipc_thread;
   std::atomic<bool> is_running{false};
-  std::map<std::string, COpenDriverDevice *>
-      devices; // raw — freed in Cleanup()
+  std::map<std::string, COpenDriverDevice *> devices;
+  std::unordered_map<std::string, std::string> device_aliases;
+  uint64_t m_hmdPoseUpdateCount = 0;
   COpenDriverHMD *m_hmd = nullptr;
   ProcessHandle runner_process; // track runner PID
 };

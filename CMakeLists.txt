@@ -171,6 +171,12 @@ if(OD_PLATFORM_WINDOWS)
     )
 endif()
 
+# ----------------------------------------------------------------------------
+# BUILT-IN TEST PLUGINS
+# ----------------------------------------------------------------------------
+
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # RUNNER EXECUTABLE (with embedded GUI)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -188,6 +194,23 @@ target_compile_definitions(opendriver_runner PRIVATE HAVE_GUI=1)
 
 if(OD_PLATFORM_WINDOWS)
     set_target_properties(opendriver_runner PROPERTIES WIN32_EXECUTABLE FALSE) # Keep console for debugging even with GUI
+    get_filename_component(QT_DEPLOY_PREFIX "${Qt6_DIR}/../../.." ABSOLUTE)
+    set(QT_BIN_DIR "${QT_DEPLOY_PREFIX}/bin")
+    set(QT_PLUGINS_DIR "${QT_DEPLOY_PREFIX}/plugins")
+
+    add_custom_command(TARGET opendriver_runner POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${QT_BIN_DIR}/Qt6Core.dll"
+            "${QT_BIN_DIR}/Qt6Gui.dll"
+            "${QT_BIN_DIR}/Qt6Widgets.dll"
+            "$<TARGET_FILE_DIR:opendriver_runner>"
+        COMMAND ${CMAKE_COMMAND} -E make_directory
+            "$<TARGET_FILE_DIR:opendriver_runner>/platforms"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${QT_PLUGINS_DIR}/platforms/qwindows.dll"
+            "$<TARGET_FILE_DIR:opendriver_runner>/platforms"
+        COMMENT "Deploying Qt runtime dependencies for opendriver_runner"
+    )
 endif()
 
 set_target_properties(opendriver_runner PROPERTIES

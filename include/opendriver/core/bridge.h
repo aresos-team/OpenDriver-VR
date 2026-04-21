@@ -68,6 +68,7 @@ public:
                 auto* device = device_registry.Get(device_id);
                 if (device) {
                     nlohmann::json j;
+                    j["id"] = device->id;
                     j["serial_number"] = device->serial_number;
                     j["type"] = static_cast<uint32_t>(device->type);
                     j["name"] = device->name;
@@ -150,7 +151,7 @@ private:
             had_clients = has_clients_now;
             
             IPCMessage msg;
-            if (ipc_server->Receive(msg, 16)) {  // 16ms ≈ ~60Hz poll rate
+            while (ipc_server->Receive(msg, 0)) {  // drain all available
                 switch (msg.type) {
                     case IPCMessageType::HAPTIC_EVENT: {
                         if (msg.data.size() >= sizeof(IPCHapticEvent)) {
@@ -186,6 +187,7 @@ private:
                         break;
                 }
             }
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
 
             // FPS calculation (every second)
             auto now = std::chrono::steady_clock::now();
@@ -207,6 +209,7 @@ private:
             msg.type = IPCMessageType::DEVICE_ADDED;
             
             nlohmann::json j;
+            j["id"] = device->id;
             j["serial_number"] = device->serial_number;
             j["type"] = static_cast<uint32_t>(device->type);
             j["name"] = device->name;

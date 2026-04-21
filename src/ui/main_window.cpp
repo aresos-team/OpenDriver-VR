@@ -23,6 +23,7 @@
 #include <filesystem>
 #include <fstream>
 #include <cstdlib>
+#include <algorithm>
 
 namespace opendriver::ui {
 
@@ -62,8 +63,8 @@ void MainWindow::setupUI() {
     mainLayout->addWidget(header);
 
     // Zakładki
-    auto* tabs = new QTabWidget(this);
-    mainLayout->addWidget(tabs);
+    m_tabs = new QTabWidget(this);
+    mainLayout->addWidget(m_tabs);
 
     // --- KARTA: OVERVIEW ---
     auto* overviewTab = new QWidget();
@@ -72,7 +73,7 @@ void MainWindow::setupUI() {
     m_deviceListView = new QListView(this);
     m_deviceListView->setModel(m_deviceModel);
     overviewLayout->addWidget(m_deviceListView);
-    tabs->addTab(overviewTab, "Overview");
+    m_tabs->addTab(overviewTab, "Overview");
 
     // --- KARTA: PLUGIN MANAGER ---
     auto* pluginTab = new QWidget();
@@ -122,13 +123,17 @@ void MainWindow::setupUI() {
     logLayout->addWidget(m_logView);
     splitter->addWidget(logContainer);
 
-    // Toolbar (Refresh)
+    // Toolbar (Refresh/Remove)
     auto* btnRefresh = new QPushButton("Refresh Plugins");
+    auto* btnRemove = new QPushButton("Remove Plugin");
+    btnRemove->setStyleSheet("background-color: #ff5555; color: white; border-radius: 4px; padding: 5px;");
     toolbar->addWidget(btnRefresh);
+    toolbar->addWidget(btnRemove);
     
-    tabs->addTab(pluginTab, "Plugins");
+    m_tabs->addTab(pluginTab, "Plugins");
 
     connect(btnRefresh, &QPushButton::clicked, this, &MainWindow::onRefreshPlugins);
+    connect(btnRemove, &QPushButton::clicked, this, &MainWindow::onRemovePlugin);
     connect(btnClearLogs, &QPushButton::clicked, m_logView, &QTextEdit::clear);
     connect(m_pluginTableView, &QTableView::clicked, this, &MainWindow::onPluginTableClicked);
     connect(m_pluginTableView->selectionModel(), &QItemSelectionModel::selectionChanged, this, &MainWindow::onPluginSelected);
@@ -214,19 +219,19 @@ void MainWindow::setupUI() {
     videoGroupLayout->addStretch();
     videoLayout->addWidget(videoGroup);
     
-    tabs->addTab(videoTab, "Video Encoding");
+    m_tabs->addTab(videoTab, "Video Encoding");
 
     setCentralWidget(central);
     
     // Load initial video settings
     onLoadVideoSettings();
+    syncPluginTabs();
 }
 
 void MainWindow::onRefreshTimer() {
     m_deviceModel->refresh();
     m_pluginModel->refresh();
-
-    // Można tu dodać dynamiczne dodawanie zakładek jeśli plugin został włączony
+    syncPluginTabs();
 }
 
 void MainWindow::onEnableAll() {
@@ -254,6 +259,7 @@ void MainWindow::onDisableAll() {
 void MainWindow::onRefreshPlugins() {
     m_runtime->ReloadPlugins();
     m_pluginModel->refresh();
+    syncPluginTabs();
 }
 
 void MainWindow::onPluginSelected(const QItemSelection& selected, const QItemSelection& /*deselected*/) {
@@ -286,8 +292,8 @@ void MainWindow::onLogReceived(const opendriver::core::LogEntry& entry) {
     QString timeStr = QDateTime::fromMSecsSinceEpoch(entry.timestamp).toString("hh:mm:ss.zzz");
     QString color = "#d4d4d4"; // default
     
-    if (entry.level >= opendriver::core::LogLevel::ERROR) color = "#ff5555";
-    else if (entry.level == opendriver::core::LogLevel::WARN) color = "#ffb86c";
+    if (entry.level >= opendriver::core::LogLevel::Error) color = "#ff5555";
+    else if (entry.level == opendriver::core::LogLevel::Warn) color = "#ffb86c";
 
     QString html = QString("<span style='color: #6272a4'>[%1]</span> <span style='color: %2'><b>[%3]</b> %4</span>")
         .arg(timeStr)
@@ -390,6 +396,109 @@ void MainWindow::onApplyVideoSettings() {
     } catch (const std::exception& e) {
         QMessageBox::critical(this, "Error", QString("Failed to save settings: %1").arg(e.what()));
         opendriver::core::Logger::GetInstance().Error("UI", std::string("Failed to save video settings: ") + e.what());
+    }
+}
+
+void MainWindow::syncPluginTabs() {
+    if (!m_tabs) {
+        return;
+    }
+
+    auto plugins = m_runtime->GetPluginLoader().GetPlugins();
+    std::vector<std::string> desired_names;
+
+    for (auto* plugin : plugins) {
+        if (!plugin) {
+            continue;
+        }
+
+        auto* provider = plugin->GetUIProvider();
+        if (!provider) {
+            continue;
+        }
+
+        const std::string plugin_name = plugin->GetName();
+        desired_names.push_back(plugin_name);
+
+        auto it = std::find_if(
+            m_pluginTabs.begin(),
+            m_pluginTabs.end(),
+            [&](const PluginTab& tab) { return tab.plugin_name == plugin_name; });
+
+        if (it == m_pluginTabs.end()) {
+            QWidget* widget = provider->CreateSettingsWidget(m_tabs);
+            m_tabs->addTab(widget, QString::fromStdString(plugin_name));
+            m_pluginTabs.push_back({plugin_name, provider, widget});
+        } else {
+            it->provider = provider;
+        }
+    }
+
+    for (auto it = m_pluginTabs.begin(); it != m_pluginTabs.end();) {
+        if (std::find(desired_names.begin(), desired_names.end(), it->plugin_name) != desired_names.end()) {
+            ++it;
+            continue;
+        }
+
+        const int tab_index = m_tabs->indexOf(it->widget);
+        if (tab_index >= 0) {
+            m_tabs->removeTab(tab_index);
+        }
+        if (it->widget) {
+            it->widget->deleteLater();
+        }
+        it = m_pluginTabs.erase(it);
+    }
+
+    for (auto& tab : m_pluginTabs) {
+        if (tab.provider) {
+            tab.provider->RefreshUI();
+        }
+    }
+}
+
+void MainWindow::onRemovePlugin() {
+    if (m_selectedPlugin.empty()) {
+        QMessageBox::information(this, "Remove Plugin", "Please select a plugin from the list first.");
+        return;
+    }
+
+    std::string name = m_selectedPlugin;
+    std::string pluginPath = "";
+    
+    auto available = m_runtime->GetAvailablePlugins();
+    for (const auto& ap : available) {
+        if (ap.name == name) {
+            pluginPath = ap.path;
+            break;
+        }
+    }
+
+    if (pluginPath.empty()) {
+        QMessageBox::critical(this, "Error", "Could not find storage path for selected plugin.");
+        return;
+    }
+
+    auto reply = QMessageBox::critical(this, "Confirm Removal",
+        QString("Are you sure you want to PERMANENTLY DELETE plugin '%1'?\n\nPath: %2\n\nThis action cannot be undone.")
+        .arg(QString::fromStdString(name))
+        .arg(QString::fromStdString(pluginPath)),
+        QMessageBox::Yes | QMessageBox::No);
+
+    if (reply == QMessageBox::Yes) {
+        try {
+            // 1. Disable/Unload
+            m_runtime->DisablePlugin(name);
+            
+            // 2. Physically remove from disk
+            std::filesystem::remove_all(pluginPath);
+            
+            QMessageBox::information(this, "Success", QString("Plugin '%1' has been removed from disk.").arg(QString::fromStdString(name)));
+            
+            onRefreshPlugins();
+        } catch (const std::exception& e) {
+            QMessageBox::critical(this, "Error", QString("Failed to remove plugin: %1").arg(e.what()));
+        }
     }
 }
 

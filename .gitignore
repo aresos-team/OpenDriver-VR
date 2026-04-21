@@ -1,0 +1,11 @@
+build/
+android/
+logs/
+
+plugins/*/build/
+
+scripts/*
+!scripts/install.ps1
+
+docs/*
+!docs/CHANGELOG.md

@@ -1,0 +1,27 @@
+{
+  "jsonid": "input_profile",
+  "controller_type": "opendriver_hmd",
+  "device_class": "TrackedDeviceClass_HMD",
+  "input_bindingui_mode": "hmd",
+  "input_source": {
+    "/pose/raw": {
+      "type": "pose",
+      "binding_image_point": [63, 148]
+    }
+  },
+  "default_bindings": [
+    {
+      "app_key": "openvr.component.vrcompositor",
+      "binding_url": "opendriver_hmd_vrcompositor_bindings.json"
+    }
+  ],
+  "legacy_binding": "{opendriver}/input/opendriver_hmd_legacy_bindings.json",
+  "simulation_settings": {
+    "modelnumber": "OpenDriver Phone HMD",
+    "serialnumber": "opendriver-phone-hmd-001",
+    "rendermodel": "generic_hmd",
+    "registered_device_type": "opendriver/opendriver_hmd",
+    "tracking_system_name": "opendriver",
+    "manufacturer_name": "OpenDriver Project"
+  }
+}

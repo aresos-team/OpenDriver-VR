@@ -42,12 +42,12 @@ void Logger::Log(LogLevel level, const std::string& source, const std::string& m
     // 1. Log to spdlog (file/console)
     spdlog::level::level_enum spd_level;
     switch (level) {
-        case LogLevel::TRACE: spd_level = spdlog::level::trace; break;
-        case LogLevel::DEBUG: spd_level = spdlog::level::debug; break;
-        case LogLevel::INFO:  spd_level = spdlog::level::info; break;
-        case LogLevel::WARN:  spd_level = spdlog::level::warn; break;
-        case LogLevel::ERROR: spd_level = spdlog::level::err; break;
-        case LogLevel::CRITICAL: spd_level = spdlog::level::critical; break;
+        case LogLevel::Trace: spd_level = spdlog::level::trace; break;
+        case LogLevel::Debug: spd_level = spdlog::level::debug; break;
+        case LogLevel::Info:  spd_level = spdlog::level::info; break;
+        case LogLevel::Warn:  spd_level = spdlog::level::warn; break;
+        case LogLevel::Error: spd_level = spdlog::level::err; break;
+        case LogLevel::Critical: spd_level = spdlog::level::critical; break;
         default: spd_level = spdlog::level::info; break;
     }
     
@@ -89,12 +89,12 @@ void Logger::SetMinLevel(LogLevel level) {
     if (!logger) return;
     
     switch (level) {
-        case LogLevel::TRACE: logger->set_level(spdlog::level::trace); break;
-        case LogLevel::DEBUG: logger->set_level(spdlog::level::debug); break;
-        case LogLevel::INFO:  logger->set_level(spdlog::level::info); break;
-        case LogLevel::WARN:  logger->set_level(spdlog::level::warn); break;
-        case LogLevel::ERROR: logger->set_level(spdlog::level::err); break;
-        case LogLevel::CRITICAL: logger->set_level(spdlog::level::critical); break;
+        case LogLevel::Trace: logger->set_level(spdlog::level::trace); break;
+        case LogLevel::Debug: logger->set_level(spdlog::level::debug); break;
+        case LogLevel::Info:  logger->set_level(spdlog::level::info); break;
+        case LogLevel::Warn:  logger->set_level(spdlog::level::warn); break;
+        case LogLevel::Error: logger->set_level(spdlog::level::err); break;
+        case LogLevel::Critical: logger->set_level(spdlog::level::critical); break;
     }
 }
 

@@ -3,8 +3,5 @@
     "name": "opendriver",
     "directory": "",
     "resourceOnly": false,
-    "hmd_presence": [
-        "0x1234",
-        "0x5678"
-    ]
+    "hmd_presence": []
 }

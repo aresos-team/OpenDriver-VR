@@ -45,10 +45,17 @@ public:
         pose.poseIsValid = true;
         pose.result = vr::TrackingResult_Running_OK;
         pose.deviceIsConnected = true;
+        pose.poseTimeOffset = 0.0;
         
         pose.qWorldFromDriverRotation = { 1.0, 0.0, 0.0, 0.0 };
         pose.qDriverFromHeadRotation = { 1.0, 0.0, 0.0, 0.0 };
         pose.qRotation = { 1.0, 0.0, 0.0, 0.0 };
+        pose.vecWorldFromDriverTranslation[0] = 0.0;
+        pose.vecWorldFromDriverTranslation[1] = 0.0;
+        pose.vecWorldFromDriverTranslation[2] = 0.0;
+        pose.vecDriverFromHeadTranslation[0] = 0.0;
+        pose.vecDriverFromHeadTranslation[1] = 0.0;
+        pose.vecDriverFromHeadTranslation[2] = 0.0;
         
         return pose;
     }

@@ -15,12 +15,12 @@ namespace opendriver::core {
 // ============================================================================
 
 enum class LogLevel : int {
-    TRACE = 0,
-    DEBUG = 1,
-    INFO = 2,
-    WARN = 3,
-    ERROR = 4,
-    CRITICAL = 5,
+    Trace = 0,
+    Debug = 1,
+    Info = 2,
+    Warn = 3,
+    Error = 4,
+    Critical = 5,
 };
 
 struct LogEntry {
@@ -49,7 +49,7 @@ public:
     /// @param log_file: pełna ścieżka do pliku (np ~/.opendriver/opendriver.log)
     /// @param min_level: minimalny level do logowania
     /// @param console: czy logować do stdout
-    void Initialize(const std::string& log_file, LogLevel min_level = LogLevel::INFO, 
+    void Initialize(const std::string& log_file, LogLevel min_level = LogLevel::Info, 
                     bool console = true);
 
     // ────────────────────────────────────────────────────────────────────
@@ -60,28 +60,28 @@ public:
     /// Format: "[timestamp] [LEVEL] [source] message"
     /// 
     /// Przykład:
-    ///   Log(LogLevel::INFO, "gyroscope_tracker", "Tracking started");
-    ///   Log(LogLevel::ERROR, "leap_motion", "Device not found");
+    ///   Log(LogLevel::Info, "gyroscope_tracker", "Tracking started");
+    ///   Log(LogLevel::Error, "leap_motion", "Device not found");
     void Log(LogLevel level, const std::string& source, const std::string& message);
 
     // Shortcuts
     void Trace(const std::string& source, const std::string& msg) {
-        Log(LogLevel::TRACE, source, msg);
+        Log(LogLevel::Trace, source, msg);
     }
     void Debug(const std::string& source, const std::string& msg) {
-        Log(LogLevel::DEBUG, source, msg);
+        Log(LogLevel::Debug, source, msg);
     }
     void Info(const std::string& source, const std::string& msg) {
-        Log(LogLevel::INFO, source, msg);
+        Log(LogLevel::Info, source, msg);
     }
     void Warn(const std::string& source, const std::string& msg) {
-        Log(LogLevel::WARN, source, msg);
+        Log(LogLevel::Warn, source, msg);
     }
     void Error(const std::string& source, const std::string& msg) {
-        Log(LogLevel::ERROR, source, msg);
+        Log(LogLevel::Error, source, msg);
     }
     void Critical(const std::string& source, const std::string& msg) {
-        Log(LogLevel::CRITICAL, source, msg);
+        Log(LogLevel::Critical, source, msg);
     }
 
     // ────────────────────────────────────────────────────────────────────

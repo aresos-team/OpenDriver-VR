@@ -2,9 +2,12 @@
 
 #include <QMainWindow>
 #include <QTimer>
+#include <opendriver/core/iui_provider.h>
 #include <opendriver/core/runtime.h>
 #include "device_model.h"
 #include "plugin_model.h"
+
+#include <vector>
 
 class QListView;
 class QTableView;
@@ -16,6 +19,8 @@ class QSpinBox;
 class QComboBox;
 class QSlider;
 class QCheckBox;
+class QTabWidget;
+class QWidget;
 
 namespace opendriver::ui {
 
@@ -40,6 +45,7 @@ private slots:
     void onQualityPresetChanged(int index);
     void onApplyVideoSettings();
     void onLoadVideoSettings();
+    void onRemovePlugin();
 
 private:
     opendriver::core::Runtime* m_runtime;
@@ -55,6 +61,7 @@ private:
     QLabel* m_logStatusLabel;
     QTextEdit* m_logView;
     QLineEdit* m_searchEdit;
+    QTabWidget* m_tabs;
     
     std::string m_selectedPlugin;
     
@@ -64,8 +71,16 @@ private:
     QComboBox* m_qualityPresetCombo;
     QLabel* m_bitrateValueLabel;
     QLabel* m_encodingStatsLabel;
+
+    struct PluginTab {
+        std::string plugin_name;
+        opendriver::core::IUIProvider* provider;
+        QWidget* widget;
+    };
+    std::vector<PluginTab> m_pluginTabs;
     
     void setupUI();
+    void syncPluginTabs();
 };
 
 } // namespace opendriver::ui

@@ -28,7 +28,6 @@ bool Runtime::Initialize(const std::string& config_dir) {
             return true;
         }
         
-        // 1. Create config dir if not exists
         m_configDir = config_dir;
         try {
             if (!fs::exists(m_configDir)) {
@@ -40,20 +39,17 @@ bool Runtime::Initialize(const std::string& config_dir) {
             return false;
         }
         
-        // 2. Load config
         std::string config_path = (fs::path(config_dir) / "config.json").string();
         try {
             config_manager.Load(config_path);
             Logger::GetInstance().Info("Core", "Configuration loaded from: " + config_path);
         } catch (const std::exception& e) {
             Logger::GetInstance().Error("Core", "Failed to load config: " + std::string(e.what()));
-            // Continue anyway - use defaults
         }
         
-        // 3. Initialize logging
         std::string log_path = (fs::path(config_dir) / "opendriver.log").string();
         try {
-            Logger::GetInstance().Initialize(log_path, LogLevel::INFO, true);
+            Logger::GetInstance().Initialize(log_path, LogLevel::Info, true);
             Logger::GetInstance().Info("Core", "Logger initialized to: " + log_path);
         } catch (const std::exception& e) {
             Logger::GetInstance().Critical("Core", "Failed to initialize logger: " + std::string(e.what()));
@@ -62,11 +58,6 @@ bool Runtime::Initialize(const std::string& config_dir) {
         
         Logger::GetInstance().Info("Core", "Runtime starting up...");
         
-        // 4. Initialize event bus (already done in constructor)
-        // 5. Initialize device registry (already done in constructor)
-        Logger::GetInstance().Debug("Core", "Event bus and device registry initialized");
-        
-        // 6. Load plugins
         std::string plugins_dir = (fs::path(config_dir) / "plugins").string();
         try {
             if (!fs::exists(plugins_dir)) {
@@ -81,7 +72,6 @@ bool Runtime::Initialize(const std::string& config_dir) {
         std::string plugin_msg = "Loaded " + std::to_string(loaded) + " plugin(s) from: " + plugins_dir;
         Logger::GetInstance().Info("Core", plugin_msg);
 
-        // 7. Start Bridge (IPC for SteamVR)
         bridge = std::make_unique<Bridge>(event_bus, device_registry);
         try {
             if (bridge->Start(OD_IPC_ADDRESS)) {
@@ -91,16 +81,13 @@ bool Runtime::Initialize(const std::string& config_dir) {
                 Logger::GetInstance().Info("Core", "Bridge started on " + std::string(OD_IPC_ADDRESS));
             } else {
                 Logger::GetInstance().Error("Core", "Failed to start Bridge on " + std::string(OD_IPC_ADDRESS));
-                // Continue anyway - Bridge is optional
             }
         } catch (const std::exception& e) {
             Logger::GetInstance().Error("Core", "Exception during Bridge initialization: " + std::string(e.what()));
-            // Continue anyway
         }
         
         is_running = true;
         
-        // Publish STARTUP event
         try {
             Event evt(EventType::CORE_STARTUP, "core");
             event_bus.Publish(evt);
@@ -122,10 +109,7 @@ bool Runtime::Initialize(const std::string& config_dir) {
 
 void Runtime::UpdateInput(const char* device_id, const char* component_name, float value) {
     try {
-        if (!is_running) {
-            Logger::GetInstance().Debug("Core", "UpdateInput called while not running");
-            return;
-        }
+        if (!is_running) return;
         
         IPCInputUpdate payload;
         memset(&payload, 0, sizeof(payload));
@@ -136,11 +120,7 @@ void Runtime::UpdateInput(const char* device_id, const char* component_name, flo
         Event evt(EventType::INPUT_UPDATE, "core");
         evt.data = payload;
         event_bus.Publish(evt);
-    } catch (const std::exception& e) {
-        Logger::GetInstance().Error("Core", "Exception in UpdateInput: " + std::string(e.what()));
-    } catch (...) {
-        Logger::GetInstance().Error("Core", "Unknown exception in UpdateInput");
-    }
+    } catch (...) {}
 }
 
 void Runtime::UpdatePose(const char* device_id, 
@@ -149,10 +129,7 @@ void Runtime::UpdatePose(const char* device_id,
                          double vx, double vy, double vz,
                          double avx, double avy, double avz) {
     try {
-        if (!is_running) {
-            Logger::GetInstance().Debug("Core", "UpdatePose called while not running");
-            return;
-        }
+        if (!is_running) return;
         
         IPCPoseData payload;
         memset(&payload, 0, sizeof(payload));
@@ -166,19 +143,12 @@ void Runtime::UpdatePose(const char* device_id,
         Event evt(EventType::POSE_UPDATE, "core");
         evt.data = payload;
         event_bus.Publish(evt);
-    } catch (const std::exception& e) {
-        Logger::GetInstance().Error("Core", "Exception in UpdatePose: " + std::string(e.what()));
-    } catch (...) {
-        Logger::GetInstance().Error("Core", "Unknown exception in UpdatePose");
-    }
+    } catch (...) {}
 }
 
 void Runtime::Shutdown() {
     try {
-        if (!is_running) {
-            Logger::GetInstance().Warn("Core", "Runtime not running, ignoring shutdown request");
-            return;
-        }
+        if (!is_running) return;
         
         Logger::GetInstance().Info("Core", "=== Runtime shutdown initiated ===");
 
@@ -188,49 +158,28 @@ void Runtime::Shutdown() {
                 event_bus.Unsubscribe(EventType::POSE_UPDATE, bridge.get());
                 event_bus.Unsubscribe(EventType::INPUT_UPDATE, bridge.get());
                 bridge->Stop();
-                Logger::GetInstance().Info("Core", "Bridge stopped");
             }
-        } catch (const std::exception& e) {
-            Logger::GetInstance().Error("Core", "Error stopping Bridge: " + std::string(e.what()));
-        } catch (...) {
-            Logger::GetInstance().Error("Core", "Unknown error stopping Bridge");
-        }
+        } catch (...) {}
         
-        // Publish SHUTDOWN event
         try {
             Event evt(EventType::CORE_SHUTDOWN, "core");
             event_bus.Publish(evt);
-            Logger::GetInstance().Info("Core", "CORE_SHUTDOWN event published");
-        } catch (const std::exception& e) {
-            Logger::GetInstance().Error("Core", "Error publishing CORE_SHUTDOWN event: " + std::string(e.what()));
-        }
+        } catch (...) {}
         
-        // Unload all plugins
         try {
             plugin_loader.UnloadAll();
-            Logger::GetInstance().Info("Core", "All plugins unloaded");
-        } catch (const std::exception& e) {
-            Logger::GetInstance().Error("Core", "Error unloading plugins: " + std::string(e.what()));
-        } catch (...) {
-            Logger::GetInstance().Error("Core", "Unknown error unloading plugins");
-        }
+        } catch (...) {}
         
         is_running = false;
-        
         Logger::GetInstance().Info("Core", "=== Runtime shutdown complete ===");
         Logger::GetInstance().Shutdown();
-    } catch (const std::exception& e) {
-        std::cerr << "Critical error during Shutdown: " << e.what() << std::endl;
-    } catch (...) {
-        std::cerr << "Unknown critical error during Shutdown" << std::endl;
-    }
+    } catch (...) {}
 }
 
 void Runtime::Tick(float delta_time) {
     try {
         if (!is_running) return;
         
-        // Process callbacks
         std::vector<std::function<void()>> callbacks;
         {
             std::lock_guard<std::mutex> lock(callback_mutex);
@@ -240,50 +189,22 @@ void Runtime::Tick(float delta_time) {
             }
         }
         
-        for (auto& cb : callbacks) {
-            try {
-                cb();
-            } catch (const std::exception& e) {
-                Logger::GetInstance().Error("Core", "Exception in main thread callback: " + std::string(e.what()));
-            } catch (...) {
-                Logger::GetInstance().Error("Core", "Unknown exception in main thread callback");
-            }
-        }
+        for (auto& cb : callbacks) try { cb(); } catch (...) {}
         
-        // Tick plugins
         try {
             plugin_loader.TickAll(delta_time);
-        } catch (const std::exception& e) {
-            Logger::GetInstance().Error("Core", "Exception in PluginLoader::TickAll: " + std::string(e.what()));
-        } catch (...) {
-            Logger::GetInstance().Error("Core", "Unknown exception in PluginLoader::TickAll");
-        }
+        } catch (...) {}
 
-        // Auto-discover new plugins check (every ~1s)
         static float auto_discover_timer = 0.0f;
         auto_discover_timer += delta_time;
         if (auto_discover_timer >= 1.0f) {
             auto_discover_timer = 0.0f;
             try {
+                // Skanujemy folder w poszukiwaniu nowych pluginów (nie ładujemy ich automatycznie!)
                 ScanPlugins();
-                auto available = GetAvailablePlugins();
-                for (const auto& ap : available) {
-                    if (ap.is_enabled && !ap.is_loaded) {
-                        Logger::GetInstance().Info("Core", "Auto-discovered new plugin: " + ap.name);
-                        EnablePlugin(ap.name);
-                    }
-                }
-            } catch (const std::exception& e) {
-                Logger::GetInstance().Error("Core", "Error during auto-discovery: " + std::string(e.what()));
-            } catch (...) {
-                Logger::GetInstance().Error("Core", "Unknown error during auto-discovery");
-            }
+            } catch (...) {}
         }
-    } catch (const std::exception& e) {
-        Logger::GetInstance().Error("Core", "Exception in Tick: " + std::string(e.what()));
-    } catch (...) {
-        Logger::GetInstance().Error("Core", "Unknown exception in Tick");
-    }
+    } catch (...) {}
 }
 
 bool Runtime::LoadPluginRuntime(const std::string& plugin_path) {
@@ -296,44 +217,32 @@ bool Runtime::UnloadPluginRuntime(const std::string& plugin_name) {
 
 void Runtime::Log(int level, const char* message) {
     try {
-        // Log to file/console
         Logger::GetInstance().Log(static_cast<LogLevel>(level), "plugin", message);
         
-        // Also publish to event bus for listeners
         LogLevelEnum evt_level = static_cast<LogLevelEnum>(level);
-        EventType evt_type = EventType::LOG_INFO;  // default
+        EventType evt_type = EventType::LOG_INFO;
         
-        if (evt_level == LogLevelEnum::TRACE) evt_type = EventType::LOG_TRACE;
-        else if (evt_level == LogLevelEnum::DEBUG) evt_type = EventType::LOG_DEBUG;
-        else if (evt_level == LogLevelEnum::INFO) evt_type = EventType::LOG_INFO;
-        else if (evt_level == LogLevelEnum::WARN) evt_type = EventType::LOG_WARN;
-        else if (evt_level == LogLevelEnum::ERROR) evt_type = EventType::LOG_ERROR;
-        else if (evt_level == LogLevelEnum::CRITICAL) evt_type = EventType::LOG_CRITICAL;
+        if (evt_level == LogLevelEnum::Trace) evt_type = EventType::LOG_TRACE;
+        else if (evt_level == LogLevelEnum::Debug) evt_type = EventType::LOG_DEBUG;
+        else if (evt_level == LogLevelEnum::Warn) evt_type = EventType::LOG_WARN;
+        else if (evt_level == LogLevelEnum::Error) evt_type = EventType::LOG_ERROR;
+        else if (evt_level == LogLevelEnum::Critical) evt_type = EventType::LOG_CRITICAL;
         
         Event evt(evt_type, "core");
         evt.data = LogMessage(evt_level, "plugin", message);
         event_bus.Publish(evt);
-    } catch (const std::exception& e) {
-        Logger::GetInstance().Critical("Runtime", "Error in Log(): " + std::string(e.what()));
-    }
+    } catch (...) {}
 }
 
 void Runtime::RegisterDevice(const Device& device) {
     try {
         if (device_registry.Register(device)) {
-            Logger::GetInstance().Info("Core", "Device registered: " + std::string(device.id) + " (type: " + std::to_string(static_cast<int>(device.type)) + ")");
-            
+            Logger::GetInstance().Info("Core", "Device registered: " + std::string(device.id));
             Event evt(EventType::DEVICE_CONNECTED, "core");
             evt.data = device.id;
             event_bus.Publish(evt);
-        } else {
-            Logger::GetInstance().Warn("Core", "Failed to register device: " + std::string(device.id) + " (likely duplicate)");
         }
-    } catch (const std::exception& e) {
-        Logger::GetInstance().Error("Core", "Exception in RegisterDevice: " + std::string(e.what()));
-    } catch (...) {
-        Logger::GetInstance().Error("Core", "Unknown exception in RegisterDevice");
-    }
+    } catch (...) {}
 }
 
 const Device* Runtime::GetDevice(const char* device_id) const {
@@ -343,19 +252,11 @@ const Device* Runtime::GetDevice(const char* device_id) const {
 void Runtime::UnregisterDevice(const char* device_id) {
     try {
         if (device_registry.Unregister(device_id)) {
-            Logger::GetInstance().Info("Core", "Device unregistered: " + std::string(device_id));
-            
             Event evt(EventType::DEVICE_DISCONNECTED, "core");
             evt.data = std::string(device_id);
             event_bus.Publish(evt);
-        } else {
-            Logger::GetInstance().Warn("Core", "Device not found for unregister: " + std::string(device_id));
         }
-    } catch (const std::exception& e) {
-        Logger::GetInstance().Error("Core", "Exception in UnregisterDevice: " + std::string(e.what()));
-    } catch (...) {
-        Logger::GetInstance().Error("Core", "Unknown exception in UnregisterDevice");
-    }
+    } catch (...) {}
 }
 
 void Runtime::UnregisterDevicesByPlugin(const char* plugin_name) {
@@ -365,13 +266,8 @@ void Runtime::UnregisterDevicesByPlugin(const char* plugin_name) {
             Event evt(EventType::DEVICE_DISCONNECTED, "core");
             evt.data = id;
             event_bus.Publish(evt);
-            Logger::GetInstance().Info("Core", "Auto-unregistered orphaned device: " + id + " (owned by " + std::string(plugin_name) + ")");
         }
-    } catch (const std::exception& e) {
-        Logger::GetInstance().Error("Core", "Exception in UnregisterDevicesByPlugin: " + std::string(e.what()));
-    } catch (...) {
-        Logger::GetInstance().Error("Core", "Unknown exception in UnregisterDevicesByPlugin");
-    }
+    } catch (...) {}
 }
 
 IPlugin* Runtime::GetPlugin(const char* name) {
@@ -391,40 +287,14 @@ void Runtime::ScanPlugins() {
 
 void Runtime::ReloadPlugins() {
     try {
-        Logger::GetInstance().Info("Core", "=== Reloading all plugins ===");
-        
-        // 1. Unload all
-        try {
-            plugin_loader.UnloadAll();
-            device_registry.Clear();
-            Logger::GetInstance().Info("Core", "All plugins unloaded");
-        } catch (const std::exception& e) {
-            Logger::GetInstance().Error("Core", "Error unloading plugins: " + std::string(e.what()));
+        plugin_loader.UnloadAll();
+        device_registry.Clear();
+        ScanPlugins();
+        auto available = plugin_loader.GetAvailablePlugins();
+        for (auto& ap : available) {
+            if (ap.is_enabled) EnablePlugin(ap.name);
         }
-        
-        // 2. Rescan and load
-        try {
-            ScanPlugins();
-            auto available = plugin_loader.GetAvailablePlugins();
-            int loaded = 0;
-            for (auto& ap : available) {
-                if (ap.is_enabled) {
-                    if (EnablePlugin(ap.name)) {
-                        loaded++;
-                    }
-                }
-            }
-            Logger::GetInstance().Info("Core", "Reloaded " + std::to_string(loaded) + " plugin(s)");
-        } catch (const std::exception& e) {
-            Logger::GetInstance().Error("Core", "Error reloading plugins: " + std::string(e.what()));
-        }
-        
-        Logger::GetInstance().Info("Core", "=== Plugin reload complete ===");
-    } catch (const std::exception& e) {
-        Logger::GetInstance().Error("Core", "Exception in ReloadPlugins: " + std::string(e.what()));
-    } catch (...) {
-        Logger::GetInstance().Error("Core", "Unknown exception in ReloadPlugins");
-    }
+    } catch (...) {}
 }
 
 std::vector<PluginLoader::AvailablePlugin> Runtime::GetAvailablePlugins() {
@@ -438,59 +308,29 @@ bool Runtime::EnablePlugin(const std::string& name) {
             if (ap.name == name) {
                 fs::path json_path = fs::path(ap.path) / "plugin.json";
                 if (fs::exists(json_path)) {
-                    try {
-                        std::ifstream f(json_path);
-                        nlohmann::json data = nlohmann::json::parse(f);
-                        std::string entry_point = data.value("entry_point", "");
-                        if (!entry_point.empty()) {
-                            fs::path plugin_file = fs::path(ap.path) / entry_point;
-                            if (fs::exists(plugin_file)) {
-                                Logger::GetInstance().Info("Core", "Enabling plugin: " + name);
-                                return plugin_loader.Load(plugin_file.string());
-                            } else {
-                                Logger::GetInstance().Error("Core", "Plugin file not found: " + plugin_file.string());
-                            }
-                        } else {
-                            Logger::GetInstance().Error("Core", "No entry_point specified for plugin: " + name);
+                    std::ifstream f(json_path);
+                    nlohmann::json data = nlohmann::json::parse(f);
+                    std::string entry_point = data.value("entry_point", "");
+                    if (!entry_point.empty()) {
+                        fs::path plugin_file = fs::path(ap.path) / entry_point;
+                        if (fs::exists(plugin_file)) {
+                            return plugin_loader.Load(plugin_file.string());
                         }
-                    } catch (const std::exception& e) {
-                        Logger::GetInstance().Error("Core", "Error parsing plugin.json for " + name + ": " + e.what());
                     }
-                } else {
-                    Logger::GetInstance().Error("Core", "plugin.json not found for " + name);
                 }
             }
         }
-        Logger::GetInstance().Warn("Core", "Plugin not found in available list: " + name);
         return false;
-    } catch (const std::exception& e) {
-        Logger::GetInstance().Error("Core", "Exception in EnablePlugin: " + std::string(e.what()));
-        return false;
-    } catch (...) {
-        Logger::GetInstance().Error("Core", "Unknown exception in EnablePlugin");
-        return false;
-    }
+    } catch (...) { return false; }
 }
 
 bool Runtime::DisablePlugin(const std::string& name) {
-    try {
-        Logger::GetInstance().Info("Core", "Disabling plugin: " + name);
-        return plugin_loader.Unload(name);
-    } catch (const std::exception& e) {
-        Logger::GetInstance().Error("Core", "Exception in DisablePlugin: " + std::string(e.what()));
-        return false;
-    } catch (...) {
-        Logger::GetInstance().Error("Core", "Unknown exception in DisablePlugin");
-        return false;
-    }
+    return plugin_loader.Unload(name);
 }
 
 void Runtime::SetAllPluginsState(bool enabled) {
-    if (!enabled) {
-        plugin_loader.UnloadAll();
-    } else {
-        ReloadPlugins();
-    }
+    if (!enabled) plugin_loader.UnloadAll();
+    else ReloadPlugins();
 }
 
 } // namespace opendriver::core
